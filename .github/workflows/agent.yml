@@ -1,4 +1,4 @@
-name: Loyo Design Tokenizer
+﻿name: Loyo Design Tokenizer
 on:
   schedule:
     - cron: '*/15 * * * *'
