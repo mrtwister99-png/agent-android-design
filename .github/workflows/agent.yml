@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install deps
-        run: pip install google-generativeai PyGithub
+        run: pip install google-genai PyGithub
       - name: Run agent
         run: python agent/agent.py
         env:
@@ -37,3 +37,4 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           REPO_NAME: mrtwister99-png/android-app-main
           AGENT_LABEL: android-design
+
