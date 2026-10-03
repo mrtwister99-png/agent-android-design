@@ -1,4 +1,4 @@
-﻿name: Loyo Design Tokenizer
+name: Loyo Design Tokenizer
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -16,13 +16,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mrtwister99-png/android-app-main
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GH_TOKEN || secrets.GH_PAT }}
           path: main
       - name: Checkout agent
         uses: actions/checkout@v4
         with:
           repository: mrtwister99-png/agent-android-design
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GH_TOKEN || secrets.GH_PAT }}
           path: agent
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -33,7 +33,7 @@ jobs:
       - name: Run agent
         run: python agent/agent.py
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GH_PAT }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           REPO_NAME: mrtwister99-png/android-app-main
           AGENT_LABEL: android-design
