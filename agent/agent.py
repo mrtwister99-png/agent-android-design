@@ -7,15 +7,16 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 REPO_NAME = os.environ.get("REPO_NAME", "mrtwister99-png/android-app-main")
 AGENT_LABEL = os.environ.get("AGENT_LABEL", "android-logic")
 
+print(f"AGENT_LABEL={AGENT_LABEL} REPO={REPO_NAME}")
+
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 g = Github(GH_TOKEN)
 repo = g.get_repo(REPO_NAME)
 
-# NOVY ZPUSOB - najde prvni otevreny issue s labelem, ne podle cisla
 issues = list(repo.get_issues(state="open", labels=[AGENT_LABEL]))
 if not issues:
-    print(f"No open issues with label {AGENT_LABEL} - exiting")
+    print(f"No open issues with label {AGENT_LABEL} - exiting OK")
     sys.exit(0)
 
 issue = issues[0]
@@ -37,9 +38,9 @@ YOUR ROLE: {AGENT_LABEL}
 
 Implement ONLY files for your role:
 - android-ui: compose screens
-- android-logic: ViewModels, logic, WeekViewModel
-- android-api: Room entities, DAO, repository
-- android-nav: navigation, gestures
+- android-logic: ViewModels
+- android-api: Room entities, DAO
+- android-nav: navigation
 - android-design: Theme.kt
 - android-test: tests
 
@@ -50,7 +51,6 @@ FILE: app/src/main/java/com/example/newapp/...
 ```kotlin
 code
 ```
-
 Create max 4 files, concise, compilable.
 """
 
@@ -62,13 +62,15 @@ print(text[:4000])
 pattern = re.compile(r'FILE:\s*(.+?)\n```(?:kotlin|java|xml|json)?\n(.*?)\n```', re.DOTALL)
 matches = pattern.findall(text)
 if not matches:
-    print("No files found in Gemini output")
+    print("No files found - exit")
     sys.exit(1)
 
 os.chdir("main")
 subprocess.run(["git","config","user.name","Loyo Bot"], check=True)
 subprocess.run(["git","config","user.email","bot@loyo.cz"], check=True)
 branch = f"feature/{issue.number}-{AGENT_LABEL}"
+# delete branch if exists
+subprocess.run(["git","branch","-D",branch], check=False)
 subprocess.run(["git","checkout","-b",branch], check=True)
 
 for path, content in matches:
@@ -81,7 +83,7 @@ for path, content in matches:
 subprocess.run(["git","add","-A"], check=True)
 subprocess.run(["git","commit","-m",f"[{AGENT_LABEL}] #{issue.number} {issue.title}"], check=True)
 remote = f"https://x-access-token:{GH_TOKEN}@github.com/{REPO_NAME}.git"
-subprocess.run(["git","push",remote,branch], check=True)
+subprocess.run(["git","push","-f",remote,branch], check=True)
 
 pr = repo.create_pull(title=f"[{AGENT_LABEL}] {issue.title} (#{issue.number})", body=f"Auto for #{issue.number}\n{issue.body}\nCloses #{issue.number}", head=branch, base="main")
 issue.create_comment(f"Bot {AGENT_LABEL} created PR #{pr.number}")
