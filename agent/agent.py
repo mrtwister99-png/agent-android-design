@@ -1,4 +1,4 @@
-﻿import os, sys, re, subprocess
+import os, sys, re, subprocess
 from github import Github
 import google.generativeai as genai
 
@@ -12,6 +12,7 @@ model = genai.GenerativeModel("gemini-1.5-flash")
 g = Github(GH_TOKEN)
 repo = g.get_repo(REPO_NAME)
 
+# NOVY ZPUSOB - najde prvni otevreny issue s labelem, ne podle cisla
 issues = list(repo.get_issues(state="open", labels=[AGENT_LABEL]))
 if not issues:
     print(f"No open issues with label {AGENT_LABEL} - exiting")
@@ -36,7 +37,7 @@ YOUR ROLE: {AGENT_LABEL}
 
 Implement ONLY files for your role:
 - android-ui: compose screens
-- android-logic: ViewModels, logic
+- android-logic: ViewModels, logic, WeekViewModel
 - android-api: Room entities, DAO, repository
 - android-nav: navigation, gestures
 - android-design: Theme.kt
