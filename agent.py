@@ -9,7 +9,6 @@ AGENT_LABEL = os.environ.get("AGENT_LABEL", "android-design")
 print(f"START {AGENT_LABEL} on {REPO_NAME}")
 
 from google import genai
-from google.genai.errors import ClientError
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 g = Github(auth=Token(GH_TOKEN))
@@ -40,28 +39,25 @@ code
 ```
 """
 
-# MODELY S NEJVYSSI FREE QUOTOU - SERAZENE PODLE LIMITU
 models_to_try = [
-    "gemini-flash-lite-latest",      # 4000 req/min - nejvyssi free
+    "gemini-flash-lite-latest",
     "models/gemini-flash-lite-latest",
-    "gemini-2.5-flash-lite",         # 4000 req/min, 4M tokens
+    "gemini-2.5-flash-lite",
     "models/gemini-2.5-flash-lite",
-    "gemini-flash-latest",           # 1000 req/min
+    "gemini-flash-latest",
     "models/gemini-flash-latest",
-    "gemini-2.5-flash",              # 1000 req/min, 1M tokens
+    "gemini-2.5-flash",
     "models/gemini-2.5-flash",
-    "gemini-3-flash-preview",        # preview ma vetsi quota nez 3.8
+    "gemini-3-flash-preview",
     "models/gemini-3-flash-preview",
     "gemini-3.5-flash-lite",
     "models/gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "models/gemini-3.1-flash-lite",
 ]
 
 text = None
 used_model = None
 for model_name in models_to_try:
-    for attempt in range(2):  # 2 pokusy na model
+    for attempt in range(2):
         try:
             print(f"Trying {model_name} attempt {attempt+1}")
             resp = client.models.generate_content(model=model_name, contents=prompt)
@@ -71,25 +67,21 @@ for model_name in models_to_try:
             break
         except Exception as e:
             err_str = str(e)
-            print(f"FAIL {model_name}: {err_str[:500]}")
-            # 429 = quota - zkus dalsi model hned, necekaj 14h
+            print(f"FAIL {model_name}: {err_str[:600]}")
             if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                print(f"Quota hit for {model_name}, switching to next model...")
+                print(f"Quota hit {model_name}, next model...")
                 time.sleep(2)
                 break
-            # 503 = overloaded - pockej a zkus znovu
             if "503" in err_str or "UNAVAILABLE" in err_str:
-                print(f"Overloaded {model_name}, retry in 5s...")
                 time.sleep(5)
                 continue
-            # 404 = model not found - dalsi
             if "404" in err_str:
                 break
     if text:
         break
 
 if not text:
-    print("All high-quota models failed, listing:")
+    print("All models failed, listing:")
     for m in client.models.list(): print(f" - {m.name}")
     sys.exit(1)
 
@@ -97,16 +89,18 @@ print(text[:5000])
 pattern=re.compile(r'FILE:\s*(.+?)\s*\n```(?:kotlin|java)?\n(.*?)\n```', re.DOTALL | re.IGNORECASE)
 matches=pattern.findall(text)
 if not matches:
-    print("Fallback - code blocks without FILE")
     code_blocks=re.findall(r'```(?:kotlin|java)?\n(.*?)\n```', text, re.DOTALL | re.IGNORECASE)
     if code_blocks:
         base="app/src/main/java/com/example/newapp/ui/theme/Theme.kt"
+        if "android-nav" in AGENT_LABEL: base="app/src/main/java/com/example/newapp/navigation/NavHost.kt"
+        elif "android-ui" in AGENT_LABEL: base="app/src/main/java/com/example/newapp/ui/screen/MainScreen.kt"
+        elif "android-logic" in AGENT_LABEL: base="app/src/main/java/com/example/newapp/logic/Logic.kt"
         for i,code in enumerate(code_blocks[:3]):
             p=base if i==0 else base.replace(".kt", f"{i}.kt")
             matches.append((p,code))
 
 if not matches:
-    print("No FILE blocks"); print(text); sys.exit(1)
+    print("No FILE blocks"); sys.exit(1)
 
 os.chdir("main")
 subprocess.run(["git","config","user.name","Loyo Bot"], check=True)
