@@ -1,14 +1,15 @@
-﻿import os, sys, re, subprocess
+﻿import os, sys, re, subprocess, time
 from github import Github
 from github.Auth import Token
 
 GH_TOKEN = os.environ["GH_TOKEN"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 REPO_NAME = os.environ.get("REPO_NAME", "mrtwister99-png/android-app-main")
-AGENT_LABEL = os.environ.get("AGENT_LABEL", "android-nav")
+AGENT_LABEL = os.environ.get("AGENT_LABEL", "android-design")
 print(f"START {AGENT_LABEL} on {REPO_NAME}")
 
 from google import genai
+from google.genai.errors import ClientError
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 g = Github(auth=Token(GH_TOKEN))
@@ -27,132 +28,104 @@ for root,dirs,files in os.walk("main/app/src"):
     for f in files[:25]:
         if f.endswith(".kt"): structure.append(os.path.join(root,f).replace("\\","/"))
 
-# JASNY PROMPT S PRIKLADEM
-prompt=f"""You are Kotlin Android dev, SDK 37, package com.example.newapp
+prompt=f"""Kotlin Android SDK 37 com.example.newapp
 ISSUE #{issue.number}: {issue.title}
 BODY: {issue.body}
 ROLE: {AGENT_LABEL}
-
-EXISTING FILES:
-{chr(10).join(structure[:35])}
-
-YOU MUST OUTPUT ONLY IN THIS EXACT FORMAT - NO EXCEPTIONS:
-
+Files: {chr(10).join(structure[:35])}
+MUST OUTPUT:
 FILE: app/src/main/java/com/example/newapp/ui/theme/Theme.kt
 ```kotlin
-package com.example.newapp.ui.theme
-...
-code here
+code
 ```
-
-FILE: app/src/main/java/com/example/newapp/ui/screen/YourScreen.kt
-```kotlin
-...
-```
-
-Rules:
-- Start each file with FILE: path on its own line
-- Then kotlin block
-- Max 3 files
-- Keep package com.example.newapp
-- Fix the issue.
 """
 
+# MODELY S NEJVYSSI FREE QUOTOU - SERAZENE PODLE LIMITU
 models_to_try = [
-    "gemini-3.8-flash",
-    "models/gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "models/gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "models/gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "models/gemini-3.5-flash",
+    "gemini-flash-lite-latest",      # 4000 req/min - nejvyssi free
+    "models/gemini-flash-lite-latest",
+    "gemini-2.5-flash-lite",         # 4000 req/min, 4M tokens
+    "models/gemini-2.5-flash-lite",
+    "gemini-flash-latest",           # 1000 req/min
+    "models/gemini-flash-latest",
+    "gemini-2.5-flash",              # 1000 req/min, 1M tokens
+    "models/gemini-2.5-flash",
+    "gemini-3-flash-preview",        # preview ma vetsi quota nez 3.8
+    "models/gemini-3-flash-preview",
+    "gemini-3.5-flash-lite",
+    "models/gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "models/gemini-3.1-flash-lite",
 ]
 
 text = None
 used_model = None
 for model_name in models_to_try:
-    try:
-        print(f"Trying {model_name}")
-        resp = client.models.generate_content(model=model_name, contents=prompt)
-        text = resp.text
-        used_model = model_name
-        print(f"OK {model_name} len={len(text)}")
+    for attempt in range(2):  # 2 pokusy na model
+        try:
+            print(f"Trying {model_name} attempt {attempt+1}")
+            resp = client.models.generate_content(model=model_name, contents=prompt)
+            text = resp.text
+            used_model = model_name
+            print(f"OK {model_name} len={len(text)}")
+            break
+        except Exception as e:
+            err_str = str(e)
+            print(f"FAIL {model_name}: {err_str[:500]}")
+            # 429 = quota - zkus dalsi model hned, necekaj 14h
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                print(f"Quota hit for {model_name}, switching to next model...")
+                time.sleep(2)
+                break
+            # 503 = overloaded - pockej a zkus znovu
+            if "503" in err_str or "UNAVAILABLE" in err_str:
+                print(f"Overloaded {model_name}, retry in 5s...")
+                time.sleep(5)
+                continue
+            # 404 = model not found - dalsi
+            if "404" in err_str:
+                break
+    if text:
         break
-    except Exception as e:
-        print(f"FAIL {model_name}: {e}")
-        continue
 
 if not text:
-    print("All models failed, listing:")
-    for m in client.models.list(): print(m.name)
+    print("All high-quota models failed, listing:")
+    for m in client.models.list(): print(f" - {m.name}")
     sys.exit(1)
 
 print(text[:5000])
-
-# 1. POKUS - standard FILE: blok
-pattern = re.compile(r'FILE:\s*(.+?)\s*\n```(?:kotlin|java)?\n(.*?)\n```', re.DOTALL | re.IGNORECASE)
-matches = pattern.findall(text)
-
-# 2. POKUS - kdyz chybi FILE: ale je tam kotlin blok, vezmi ho a odhadni cestu
+pattern=re.compile(r'FILE:\s*(.+?)\s*\n```(?:kotlin|java)?\n(.*?)\n```', re.DOTALL | re.IGNORECASE)
+matches=pattern.findall(text)
 if not matches:
-    print("No FILE blocks with regex1, trying fallback...")
-    # najdi vsechny kotlin bloky
-    code_blocks = re.findall(r'```(?:kotlin|java)?\n(.*?)\n```', text, re.DOTALL | re.IGNORECASE)
+    print("Fallback - code blocks without FILE")
+    code_blocks=re.findall(r'```(?:kotlin|java)?\n(.*?)\n```', text, re.DOTALL | re.IGNORECASE)
     if code_blocks:
-        print(f"Found {len(code_blocks)} code blocks without FILE header, guessing paths...")
-        # podle AGENT_LABEL odhadni cestu
-        base_guess = {
-            "android-design": "app/src/main/java/com/example/newapp/ui/theme/Theme.kt",
-            "android-ui": "app/src/main/java/com/example/newapp/ui/screen/MainScreen.kt",
-            "android-nav": "app/src/main/java/com/example/newapp/navigation/NavHost.kt",
-            "android-logic": "app/src/main/java/com/example/newapp/logic/Logic.kt",
-            "android-api": "app/src/main/java/com/example/newapp/data/Api.kt",
-        }
-        guess_path = base_guess.get(AGENT_LABEL, f"app/src/main/java/com/example/newapp/{AGENT_LABEL.replace('android-','')}/Generated.kt")
-        for i, code in enumerate(code_blocks[:3]):
-            # pokud je vic bloku, rozlis
-            p = guess_path if i==0 else guess_path.replace(".kt", f"{i}.kt")
-            matches.append((p, code))
-            print(f"Guessed {p}")
-
-# 3. POKUS - kdyz ani bloky nejsou, vezmi cely text jako kod (tvuj pripad z obrazku)
-if not matches:
-    print("Still no blocks, taking whole output as kotlin file...")
-    # odstran pripadne importy a vezmi cely
-    clean = text.strip()
-    if "import" in clean and "package" in clean:
-        guess_path = f"app/src/main/java/com/example/newapp/{AGENT_LABEL.replace('android-','')}/Generated.kt"
-        matches = [(guess_path, clean)]
-        print(f"Using whole text as {guess_path}")
+        base="app/src/main/java/com/example/newapp/ui/theme/Theme.kt"
+        for i,code in enumerate(code_blocks[:3]):
+            p=base if i==0 else base.replace(".kt", f"{i}.kt")
+            matches.append((p,code))
 
 if not matches:
-    print("No FILE blocks after all fallbacks")
-    print(text)
-    sys.exit(1)
+    print("No FILE blocks"); print(text); sys.exit(1)
 
-print(f"Will write {len(matches)} files")
 os.chdir("main")
 subprocess.run(["git","config","user.name","Loyo Bot"], check=True)
 subprocess.run(["git","config","user.email","bot@loyo.cz"], check=True)
 branch=f"feature/{issue.number}-{AGENT_LABEL}"
 subprocess.run(["git","branch","-D",branch], check=False)
 subprocess.run(["git","checkout","-b",branch], check=True)
-
 for path,content in matches:
-    path=path.strip().lstrip("/").strip()
-    # security - musi byt uvnitr app/src
-    if not path.startswith("app/src"):
-        path = f"app/src/main/java/com/example/newapp/{os.path.basename(path)}"
+    path=path.strip().lstrip("/")
+    if not path.startswith("app/src"): path=f"app/src/main/java/com/example/newapp/{os.path.basename(path)}"
     full=os.path.join(os.getcwd(), path)
     os.makedirs(os.path.dirname(full), exist_ok=True)
     open(full,"w",encoding="utf-8").write(content)
-    print(f"WROTE {path} ({len(content)} chars)")
+    print(f"WROTE {path}")
 
 subprocess.run(["git","add","-A"], check=True)
-subprocess.run(["git","commit","-m",f"[{AGENT_LABEL}] #{issue.number} {issue.title}"], check=True)
+subprocess.run(["git","commit","-m",f"[{AGENT_LABEL}] #{issue.number}"], check=True)
 remote=f"https://x-access-token:{GH_TOKEN}@github.com/{REPO_NAME}.git"
 subprocess.run(["git","push","-f",remote,branch], check=True)
-pr=repo.create_pull(title=f"[{AGENT_LABEL}] {issue.title} (#{issue.number})", body=f"Closes #{issue.number}\nModel: {used_model}", head=branch, base="main")
+pr=repo.create_pull(title=f"[{AGENT_LABEL}] {issue.title} (#{issue.number})", body=f"Closes #{issue.number} Model:{used_model}", head=branch, base="main")
 issue.create_comment(f"PR #{pr.number} {pr.html_url} via {used_model}")
 print(f"PR {pr.number} OK via {used_model}")
