@@ -1,36 +1,39 @@
-name: Loyo Design Tokenizer
+﻿name: Loyo Design Tokenizer
 on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
-  issues:
-    types: [opened, labeled]
 
 jobs:
   agent:
-    if: contains(github.event.issue.labels.*.name, 'android-design')
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout main app
+        uses: actions/checkout@v4
         with:
           repository: mrtwister99-png/android-app-main
           token: ${{ secrets.GH_TOKEN }}
-      - uses: actions/checkout@v4
+          path: main
+      - name: Checkout agent
+        uses: actions/checkout@v4
         with:
-          path: agent
           repository: mrtwister99-png/agent-android-design
           token: ${{ secrets.GH_TOKEN }}
-      - uses: actions/setup-python@v5
+          path: agent
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install google-generativeai PyGithub
-      - run: python agent/agent.py
+      - name: Install deps
+        run: pip install google-generativeai PyGithub
+      - name: Run agent
+        run: python agent/agent.py
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
           REPO_NAME: mrtwister99-png/android-app-main
+          AGENT_LABEL: android-design
